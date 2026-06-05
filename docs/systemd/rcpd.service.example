@@ -1,0 +1,17 @@
+[Unit]
+Description=RCPD Backend daemon
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rcpd
+Group=rcpd
+WorkingDirectory=/opt/rcpd-backend/backend
+ExecStart=/usr/bin/python3 /opt/rcpd-backend/backend/rcpd.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

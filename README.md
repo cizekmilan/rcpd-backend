@@ -1,10 +1,10 @@
-# ⚡ RCPD Backend
+# ⚡ Remote Controlled Power Distribution (RCPD)
 
 > Python daemon and WebSocket API for remotely switching power outputs through R421B16 Modbus relay boards.
 
 # 🎯 Overview
 
-RCPD Backend provides a small daemon for controlling relay outputs over Modbus RTU. It is primarily intended for 16-channel R421B16 RS485 relay boards connected to a Raspberry Pi or another Linux device.
+RCPD backend provides a small daemon for controlling relay outputs over Modbus RTU. It is primarily intended for 16-channel R421B16 RS485 relay boards connected to a Raspberry Pi or another Linux device.
 
 The original use case is remote power control in a server room: switching or restarting devices that do not provide IPMI, managed PDU support, or another dedicated remote power interface.
 
@@ -36,6 +36,14 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 │   └── serial_ports.py          # Serial port discovery helper
 ├── examples/
 │   └── hardware_smoke_test.py
+├── docs/
+│   ├── database/
+│   │   └── rcpd_schema_with_demo_data.sql   # Demo database schema and data
+│   ├── hardware/
+│   │   ├── R421B16/   # Relay board datasheets and wiring reference
+│   │   └── Waveshare-RS485-CAN-HAT/   # Raspberry Pi HAT reference material
+│   └── systemd/
+│       └── rcpd.service.example   # Example systemd unit
 └── tests/
     └── test_protocol.py         # WebSocket protocol validation tests
 ```
@@ -127,6 +135,39 @@ Show version:
 
 The daemon writes detailed logs to `LOG_FILE` and stores its process lock in `PID_FILE`.
 
+# 🧩 systemd Service
+
+An example systemd unit is available in `docs/systemd/rcpd.service.example`.
+
+This is mainly useful on systemd-based Linux distributions such as Raspberry Pi OS, Debian, or Ubuntu. Before installing the service, review and adjust at least these values:
+
+* `User` and `Group`
+* `WorkingDirectory`
+* `ExecStart`
+* paths in `.env`, especially `LOG_FILE` and `PID_FILE`
+
+Example installation:
+
+```bash
+sudo cp docs/systemd/rcpd.service.example /etc/systemd/system/rcpd.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now rcpd
+```
+
+Check service status:
+
+```bash
+sudo systemctl status rcpd
+```
+
+Follow service logs:
+
+```bash
+sudo journalctl -u rcpd -f
+```
+
+The daemon reads `.env` from its working directory, so `WorkingDirectory` in the service unit must point to the backend directory containing `rcpd.py` and `.env`.
+
 # 🔌 WebSocket API
 
 Default endpoint:
@@ -211,7 +252,20 @@ Run the hardware smoke test against a running daemon:
 python3 examples/hardware_smoke_test.py
 ```
 
-The smoke test sends real relay commands. Use it only when the connected hardware can be safely switched.
+The smoke test connects to the WebSocket API, asks the daemon to reload configuration, clears the command queue, and sends a fixed sequence of relay commands to verify that the daemon, Modbus communication, and relay board responses work together.
+
+The current test sequence targets board addresses `0x1` and `0x2`; some command types are tested only on `0x1`. After the switching sequence, it keeps polling relay states until interrupted.
+
+The smoke test sends real relay commands. Use it only when the connected hardware and powered devices can be safely switched.
+
+# 📚 Documentation
+
+Additional project documentation is stored in `docs/`:
+
+* `docs/database/` - demo database schema and demo data.
+* `docs/hardware/R421B16/` - relay board reference files and wiring diagram.
+* `docs/hardware/Waveshare-RS485-CAN-HAT/` - Raspberry Pi HAT reference material. See also the [Waveshare RS485 CAN HAT wiki](https://www.waveshare.com/wiki/RS485_CAN_HAT).
+* `docs/systemd/` - example systemd service unit.
 
 # ✅ Tests
 
