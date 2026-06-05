@@ -261,6 +261,55 @@ class R421B16(object):
 
         return -1
 
+    def _read_relay_status_all(self):
+        """
+        Read status of all relays in one Modbus request.
+
+        :return: Dictionary with relay status [(number: status}, ...]
+        """
+        if not self._modbus.is_open():
+            raise ModbusException('Error: Serial port not open')
+
+        tx_data = [
+            self._address,              # Slave address of the relay board 0..63
+            FUNCTION_READ_STATUS,       # Read status is always 0x03
+            0x00, 0x01,                 # First relay register 0x0001
+            0x00, self._num_relays      # Number of relay registers to read
+        ]
+
+        self._modbus.send(tx_data)
+
+        rx_data = self._modbus.receive(5 + (self._num_relays * 2))
+
+        if rx_data and len(rx_data) > 2:
+            data_no_crc = rx_data[:-2]
+            crc = rx_data[-2:]
+            if self._modbus.crc(data_no_crc) != crc:
+                raise ModbusException('RX error: Incorrect CRC received')
+            elif rx_data[0] != tx_data[0]:
+                raise ModbusException('RX error: Incorrect address received')
+            elif rx_data[1] != tx_data[1]:
+                raise ModbusException('RX error: Incorrect function received')
+            elif rx_data[2] != self._num_relays * 2:
+                raise ModbusException('RX error: Incorrect data length received')
+
+            relay_status = {}
+            for relay in range(1, self._num_relays + 1):
+                register_index = 3 + ((relay - 1) * 2)
+                data_high = rx_data[register_index]
+                data_low = rx_data[register_index + 1]
+
+                if data_high != 0:
+                    raise ModbusException('RX error: Incorrect data high Byte received')
+                elif data_low != 0 and data_low != 1:
+                    raise ModbusException('RX error: Incorrect data low Byte received')
+
+                relay_status[relay] = data_low
+
+            return relay_status
+
+        return {relay: -1 for relay in range(1, self._num_relays + 1)}
+
     # ----------------------------------------------------------------------------------------------
     # Public functions to read/write single relay
     # ----------------------------------------------------------------------------------------------
@@ -402,7 +451,7 @@ class R421B16(object):
     # Public functions to read/write all relays
     # ----------------------------------------------------------------------------------------------
     def get_status_all(self):
-        return self.get_status_multi(range(1, self._num_relays + 1))
+        return self._read_relay_status_all()
 
     def print_status_all(self, indent=False):
         return self.print_status_multi(range(1, self._num_relays + 1), indent=indent)

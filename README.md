@@ -287,6 +287,23 @@ Run a syntax/bytecode check:
 python3 -m compileall .
 ```
 
+# ⚡ R421B16 Modbus Notes
+
+Relay state refresh is optimized for the R421B16 board.
+
+The daemon reads all 16 relay states from one board with a single Modbus FC3 request (`Read Holding Registers`). This was verified on real hardware with `mbpoll`:
+
+```bash
+mbpoll -m rtu -a 1 -b 19200 -P none -t 4 -r 1 -c 16 /dev/ttyAMA0
+```
+
+Standard multi-write Modbus functions were also tested, but the R421B16 board did not respond:
+
+* FC15 `Write Multiple Coils` - connection timed out
+* FC16 `Write Multiple Holding Registers` - connection timed out
+
+For this reason, multi-relay write commands are intentionally implemented as a sequence of single-relay control commands. Bulk relay writes are not implemented.
+
 # 📝 Notes
 
 - This project is intentionally focused on the backend daemon.
