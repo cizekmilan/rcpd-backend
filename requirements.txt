@@ -1,0 +1,7 @@
+peewee
+# MySQL/MariaDB driver used by peewee.MySQLDatabase.
+PyMySQL
+python-dotenv
+pyserial
+termcolor
+websockets
