@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from logging.handlers import RotatingFileHandler
-from threading import Lock
+from threading import Event, Lock
 from dotenv import load_dotenv
 from termcolor import colored
 
@@ -44,6 +44,7 @@ DEVICE = os.getenv("DEVICE", "/dev/ttyAMA0") or "/dev/ttyAMA0"
 BAUD_RATE = get_env_int("BAUD_RATE", 9600)
 WS_SERVER_LISTENING_ADDR = os.getenv("WS_SERVER_LISTENING_ADDR") or None
 WS_SERVER_LISTENING_PORT = get_env_int("WS_SERVER_LISTENING_PORT", 8001)
+COMMAND_QUEUE_MAX_SIZE = get_env_int("COMMAND_QUEUE_MAX_SIZE", 100)
 LOG_FILE = os.getenv("LOG_FILE", "/var/log/rcpd.log") or "/var/log/rcpd.log"
 PID_FILE = os.getenv("PID_FILE", "/var/run/rcpd.pid") or "/var/run/rcpd.pid"
 
@@ -54,6 +55,11 @@ DB_NAME = os.getenv("DB_NAME", "rcpd") or "rcpd"
 
 
 db.init(DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
+
+
+if COMMAND_QUEUE_MAX_SIZE < 1:
+    print("Invalid value for COMMAND_QUEUE_MAX_SIZE in .env, using default: 100", file=sys.stderr)
+    COMMAND_QUEUE_MAX_SIZE = 100
 
 
 LOG_FORMAT = logging.Formatter('%(asctime)-25s %(name)-40s %(threadName)-15s %(levelname)-8s %(module)-30s %(funcName)-30s :%(lineno)-8s %(message)s')
@@ -73,6 +79,7 @@ def log_runtime_config():
     """Zapíše do logu základní runtime konfiguraci bez citlivých údajů."""
     LOGGER.info("serial: device=%s baud_rate=%d", DEVICE, BAUD_RATE)
     LOGGER.info("websocket: listen_addr=%s listen_port=%d", WS_SERVER_LISTENING_ADDR, WS_SERVER_LISTENING_PORT)
+    LOGGER.info("command queue: max_size=%d", COMMAND_QUEUE_MAX_SIZE)
     LOGGER.info("database: host=%s name=%s", DB_HOST, DB_NAME)
 
 
@@ -91,7 +98,7 @@ def log_runtime_config():
 # objekty relay bordů
 boards = []
 # fronta (FIFO) přijatých příkazů přes websocket, které se postupně zpracovávají
-cmds_queue = queue.Queue()  # Queue/SimpleQueue
+cmds_queue = queue.Queue(maxsize=COMMAND_QUEUE_MAX_SIZE)
 # poslední úspěšně vyčtený stav všech relé
 relay_states = {}
 # zámek kritické sekce bránící souběhu při Modbus komunikaci
@@ -339,12 +346,27 @@ def init_modbus():
 def start_ws_server():
     """Spustí WebSocket server v samostatném vlákně."""
     LOGGER.info("starting websocket server thread ...")
+    startup_event = Event()
+    startup_error = {}
+
     websocket_t = threading.Thread(
         target=ws_server.run,
-        args=(WS_SERVER_LISTENING_ADDR, WS_SERVER_LISTENING_PORT, cmds_queue, get_relay_states_snapshot),
+        args=(WS_SERVER_LISTENING_ADDR, WS_SERVER_LISTENING_PORT, cmds_queue, get_relay_states_snapshot, startup_event, startup_error),
         daemon=True,
     )
     websocket_t.start()
+
+    if not startup_event.wait(timeout=5):
+        LOGGER.error("websocket server did not report startup status within timeout")
+        print("WebSocket server startup timeout. Terminated.")
+        sys.exit(1)
+
+    if startup_error:
+        LOGGER.error("websocket server startup failed: %s", startup_error["error"])
+        print(f"WebSocket server startup failed: {startup_error['error']}")
+        sys.exit(1)
+
+    LOGGER.info("websocket server thread started")
 
 
 def main_loop():

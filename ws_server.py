@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import queue
 
 import websockets
 from termcolor import colored
@@ -39,6 +40,21 @@ def mark_command_processed(json_reply, success):
     else:
         json_reply['result'] = "ERROR"
         json_reply['message'] = "Command accepted but processing failed."
+
+
+def enqueue_command(cmds_queue, data, command, json_reply):
+    """Vloží validovaný příkaz do fronty, nebo vrátí chybu při zaplnění fronty."""
+    try:
+        cmds_queue.put_nowait(data)
+    except queue.Full:
+        LOGGER.warning("command queue is full, command '%s' rejected", command)
+        json_reply['result'] = "ERROR"
+        json_reply['message'] = "Command queue is full. Command was rejected."
+        return False
+
+    LOGGER.debug("received command '%s' added to the queue", command)
+    json_reply['message'] = "Command accepted and placed to the queue."
+    return True
 
 
 async def websocket_handler(websocket, path, cmds_queue, get_relay_states_snapshot):
@@ -81,9 +97,7 @@ async def websocket_handler(websocket, path, cmds_queue, get_relay_states_snapsh
                     mark_command_processed(json_reply, True)
 
                 else:
-                    cmds_queue.put(data)
-                    LOGGER.debug("received command '%s' added to the queue", command)
-                    json_reply['message'] = "Command accepted and placed to the queue."
+                    enqueue_command(cmds_queue, data, command, json_reply)
             else:
                 LOGGER.error("received data does not match the defined protocol and will not be processed!")
                 json_reply['result'] = "ERROR"
@@ -98,7 +112,7 @@ async def websocket_handler(websocket, path, cmds_queue, get_relay_states_snapsh
             break
 
 
-def run(listen_addr, listen_port, cmds_queue, get_relay_states_snapshot):
+def run(listen_addr, listen_port, cmds_queue, get_relay_states_snapshot, startup_event=None, startup_error=None):
     """Spustí WebSocket server v aktuálním vlákně."""
     async def handler(websocket, path):
         await websocket_handler(websocket, path, cmds_queue, get_relay_states_snapshot)
@@ -106,6 +120,21 @@ def run(listen_addr, listen_port, cmds_queue, get_relay_states_snapshot):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    start_server = websockets.serve(handler, listen_addr, listen_port, ping_interval=30, ping_timeout=5)
-    loop.run_until_complete(start_server)
-    loop.run_forever()
+    try:
+        start_server = websockets.serve(handler, listen_addr, listen_port, ping_interval=30, ping_timeout=5)
+        loop.run_until_complete(start_server)
+        LOGGER.info("websocket server listening on %s:%d", listen_addr, listen_port)
+
+        if startup_event:
+            startup_event.set()
+
+        loop.run_forever()
+    except Exception as err:
+        LOGGER.exception("websocket server failed to start or stopped unexpectedly: %s", err)
+
+        if startup_error is not None:
+            startup_error["error"] = err
+        if startup_event:
+            startup_event.set()
+    finally:
+        loop.close()

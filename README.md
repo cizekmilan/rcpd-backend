@@ -45,7 +45,9 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 │   └── systemd/
 │       └── rcpd.service.example   # Example systemd unit
 └── tests/
-    └── test_protocol.py         # WebSocket protocol validation tests
+    ├── test_protocol.py         # WebSocket protocol validation tests
+    ├── test_r421b16.py          # R421B16 driver unit tests
+    └── test_ws_server.py        # WebSocket queue handling tests
 ```
 
 # ⚙️ Requirements
@@ -95,6 +97,7 @@ BAUD_RATE=9600
 
 WS_SERVER_LISTENING_ADDR=127.0.0.1
 WS_SERVER_LISTENING_PORT=8001
+COMMAND_QUEUE_MAX_SIZE=100
 
 LOG_FILE=/var/log/rcpd.log
 PID_FILE=/var/run/rcpd.pid
@@ -112,6 +115,8 @@ If you use a Raspberry Pi, the Waveshare RS485 CAN HAT is a recommended option.
 The R421B16 factory default baud rate is usually `9600`. If your boards were reconfigured, update `BAUD_RATE` in `.env`.
 
 The WebSocket server listens on `127.0.0.1` by default. Use `0.0.0.0` only when the API should be reachable from other hosts.
+
+`COMMAND_QUEUE_MAX_SIZE` limits how many relay control commands may wait for Modbus processing. When the queue is full, new relay commands are rejected with an `ERROR` WebSocket response instead of being accepted indefinitely.
 
 # 🚀 Running
 
@@ -243,6 +248,8 @@ Each WebSocket response includes:
 * `message` - short status text
 * `relay_states` - latest known relay state snapshot
 * `in_queue` - number of queued control commands
+
+Relay commands are accepted into a bounded processing queue. If the queue is full, the command is rejected and is not executed.
 
 # 🧪 Examples
 
