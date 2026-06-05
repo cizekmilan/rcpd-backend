@@ -23,31 +23,31 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 
 ```text
 /
-├── rcpd.py                      # Main daemon entry point
-├── ws_server.py                 # WebSocket server and immediate API responses
-├── protocol.py                  # WebSocket command validation and address parsing
-├── models.py                    # Peewee database models
-├── repository.py                # Database read/query helpers
-├── requirements.txt             # Python dependencies
-├── .env.example                 # Example local configuration
+├── rcpd.py                                  # Main daemon entry point
+├── ws_server.py                             # WebSocket server and immediate API responses
+├── protocol.py                              # WebSocket command validation and address parsing
+├── models.py                                # Peewee database models
+├── repository.py                            # Database read/query helpers
+├── requirements.txt                         # Python dependencies
+├── .env.example                             # Example local configuration
 ├── relay_drivers/
-│   ├── R421B16.py               # R421B16 relay board driver
-│   ├── modbus.py                # Low-level Modbus RTU helper
-│   └── serial_ports.py          # Serial port discovery helper
+│   ├── R421B16.py                           # R421B16 relay board driver
+│   ├── modbus.py                            # Low-level Modbus RTU helper
+│   └── serial_ports.py                      # Serial port discovery helper
 ├── examples/
 │   └── hardware_smoke_test.py
 ├── docs/
 │   ├── database/
 │   │   └── rcpd_schema_with_demo_data.sql   # Demo database schema and data
 │   ├── hardware/
-│   │   ├── R421B16/   # Relay board datasheets and wiring reference
-│   │   └── Waveshare-RS485-CAN-HAT/   # Raspberry Pi HAT reference material
+│   │   ├── R421B16/                         # Relay board datasheets and wiring reference
+│   │   └── Waveshare-RS485-CAN-HAT/         # Raspberry Pi HAT reference material
 │   └── systemd/
-│       └── rcpd.service.example   # Example systemd unit
+│       └── rcpd.service.example             # Example systemd unit
 └── tests/
-    ├── test_protocol.py         # WebSocket protocol validation tests
-    ├── test_r421b16.py          # R421B16 driver unit tests
-    └── test_ws_server.py        # WebSocket queue handling tests
+    ├── test_protocol.py                     # WebSocket protocol validation tests
+    ├── test_r421b16.py                      # R421B16 driver unit tests
+    └── test_ws_server.py                    # WebSocket queue handling tests
 ```
 
 # ⚙️ Requirements
