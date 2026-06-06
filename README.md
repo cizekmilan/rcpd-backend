@@ -35,7 +35,8 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 │   ├── modbus.py                            # Low-level Modbus RTU helper
 │   └── serial_ports.py                      # Serial port discovery helper
 ├── examples/
-│   └── hardware_smoke_test.py
+│   ├── hardware_smoke_test.py
+│   └── websocket_manual_toggle_demo.py     # Simple guarded manual toggle demo
 ├── docs/
 │   ├── database/
 │   │   └── rcpd_schema_with_demo_data.sql   # Demo database schema and data
@@ -47,6 +48,7 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 └── tests/
     ├── test_protocol.py                     # WebSocket protocol validation tests
     ├── test_r421b16.py                      # R421B16 driver unit tests
+    ├── test_websocket_manual_toggle_demo.py # Manual toggle demo helper tests
     └── test_ws_server.py                    # WebSocket queue handling tests
 ```
 
@@ -266,6 +268,14 @@ The smoke test connects to the WebSocket API, asks the daemon to reload configur
 The current test sequence targets board addresses `0x1` and `0x2`; some command types are tested only on `0x1`. After the switching sequence, it keeps polling relay states until interrupted.
 
 The smoke test sends real relay commands. Use it only when the connected hardware and powered devices can be safely switched.
+
+There is also a simple guarded manual toggle demo:
+
+```bash
+python3 examples/websocket_manual_toggle_demo.py
+```
+
+It loads relay configuration from the daemon through `CMD_GETCONFIG`, validates `board/relay` input against that configuration, toggles one relay at a time, and can reset the command queue with `rq`. It is intentionally small and is not the primary TUI client.
 
 # 📚 Documentation
 
