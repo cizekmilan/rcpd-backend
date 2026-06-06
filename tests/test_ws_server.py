@@ -4,46 +4,11 @@
 # rel. 2024-10-23 <milan.cizek@starnet.cz>
 
 import queue
-import sys
-import types
 import unittest
 
-
-try:
-    import websockets  # noqa: F401
-except ImportError:
-    websockets_stub = types.ModuleType("websockets")
-
-    class ConnectionClosed(Exception):
-        """Minimální náhrada výjimky z balíku websockets pro import ws_server."""
-
-    websockets_stub.ConnectionClosed = ConnectionClosed
-    sys.modules["websockets"] = websockets_stub
+import ws_server
 
 
-try:
-    import termcolor  # noqa: F401
-except ImportError:
-    termcolor_stub = types.ModuleType("termcolor")
-    termcolor_stub.colored = lambda text, *args, **kwargs: text
-    sys.modules["termcolor"] = termcolor_stub
-
-
-repository_stub = types.ModuleType("repository")
-repository_stub.get_relays_config = lambda: (True, {})
-sys.modules["repository"] = repository_stub
-
-
-try:
-    import ws_server
-except ImportError as err:
-    ws_server = None
-    WEBSOCKET_IMPORT_ERROR = err
-else:
-    WEBSOCKET_IMPORT_ERROR = None
-
-
-@unittest.skipIf(ws_server is None, f"ws_server import failed: {WEBSOCKET_IMPORT_ERROR}")
 class TestWsServer(unittest.TestCase):
 
     def setUp(self):

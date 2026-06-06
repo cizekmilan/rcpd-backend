@@ -105,12 +105,18 @@ relay_states = {}
 lock = Lock()
 # zámek pro konzistentní čtení a zápis snapshotu stavů relé mezi vlákny
 state_lock = Lock()
+shutdown_event = Event()
 _modbus = None
 
 
 def signal_handler(sig, frame):
-    """Zpracuje ukončení přes Ctrl+C a odstraní PID soubor."""
-    LOGGER.debug("Interrupted, received signal %s", sig)
+    """Zpracuje ukončení přes Ctrl+C nebo SIGTERM a požádá démona o korektní doběhnutí."""
+    LOGGER.info("shutdown requested, received signal %s", sig)
+    shutdown_event.set()
+
+
+def remove_pid_file():
+    """Odstraní PID soubor vytvořený při startu démona."""
     try:
         os.remove(PID_FILE)
         LOGGER.debug("pid file '%s' removed", PID_FILE)
@@ -118,7 +124,40 @@ def signal_handler(sig, frame):
         LOGGER.debug("pid file '%s' already removed", PID_FILE)
     except OSError as err:
         LOGGER.error("pid file '%s' could not be removed: %s", PID_FILE, err)
-    sys.exit(0)
+
+
+def close_modbus():
+    """Zavře otevřený Modbus/sériový port, pokud existuje."""
+    if _modbus is None:
+        return
+
+    try:
+        if _modbus.is_open():
+            _modbus.close()
+            LOGGER.info("serial device closed")
+    except Exception as err:
+        LOGGER.error("serial device could not be closed cleanly: %s", err)
+
+
+def cleanup(websocket_t=None, remove_pid=False):
+    """Uklidí runtime prostředky při ukončení démona."""
+    LOGGER.info("stopping rcpd daemon ...")
+    shutdown_event.set()
+
+    if websocket_t and websocket_t.is_alive():
+        websocket_t.join(timeout=5)
+        if websocket_t.is_alive():
+            LOGGER.warning("websocket server thread did not stop within timeout")
+
+    close_modbus()
+
+    if remove_pid:
+        remove_pid_file()
+
+
+def sleep_interruptible(seconds):
+    """Spí po kratších úsecích, aby šlo rychle reagovat na shutdown signál."""
+    return shutdown_event.wait(timeout=seconds)
 
 
 def is_already_running():
@@ -351,7 +390,7 @@ def start_ws_server():
 
     websocket_t = threading.Thread(
         target=ws_server.run,
-        args=(WS_SERVER_LISTENING_ADDR, WS_SERVER_LISTENING_PORT, cmds_queue, get_relay_states_snapshot, startup_event, startup_error),
+        args=(WS_SERVER_LISTENING_ADDR, WS_SERVER_LISTENING_PORT, cmds_queue, get_relay_states_snapshot, startup_event, startup_error, shutdown_event),
         daemon=True,
     )
     websocket_t.start()
@@ -367,18 +406,20 @@ def start_ws_server():
         sys.exit(1)
 
     LOGGER.info("websocket server thread started")
+    return websocket_t
 
 
 def main_loop():
     """Spouští hlavní nekonečnou smyčku démona."""
-    while True:
+    while not shutdown_event.is_set():
         # zaregistrujeme (přidáme do seznamu) objekty relay desek
         # pokud se nepodaří nebo neexistuje v databázi žádný záznam, pak nemá smysl pokračovat (není co vyčítat ani řídit, zbrzdíme)
         if len(boards) == 0:
             LOGGER.debug("there are no relay boards in the list we are trying to load them")
             LOGGER.debug("refreshing configuration ...")
             get_boards_from_db()
-            time.sleep(5)
+            if sleep_interruptible(5):
+                break
 
         # vyčteme stavy relé na všech dostupných deskách
         get_relay_states()
@@ -388,24 +429,31 @@ def main_loop():
 def main():
     """Inicializuje démona a předá řízení hlavní smyčce."""
     global _modbus
+    websocket_t = None
+    pid_owned = False
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    parse_arguments()
-    configure_file_logging()
-    print_startup_banner()
-    log_runtime_config()
+    try:
+        parse_arguments()
+        configure_file_logging()
+        print_startup_banner()
+        log_runtime_config()
 
-    if is_already_running():
-        print("Another instance is already running! Terminated.")
-        sys.exit(1)
+        if is_already_running():
+            print("Another instance is already running! Terminated.")
+            sys.exit(1)
+        pid_owned = True
 
-    _modbus = init_modbus()
+        _modbus = init_modbus()
 
-    print("initializing done.")
-    start_ws_server()
-    main_loop()
+        websocket_t = start_ws_server()
+        print("initializing done.")
+        main_loop()
+    finally:
+        if pid_owned or websocket_t or _modbus:
+            cleanup(websocket_t, remove_pid=pid_owned)
 
 
 if __name__ == '__main__':

@@ -112,7 +112,18 @@ async def websocket_handler(websocket, path, cmds_queue, get_relay_states_snapsh
             break
 
 
-def run(listen_addr, listen_port, cmds_queue, get_relay_states_snapshot, startup_event=None, startup_error=None):
+async def shutdown_watcher(server, stop_event, loop):
+    """Sleduje shutdown flag a při ukončení zavře WebSocket server."""
+    while not stop_event.is_set():
+        await asyncio.sleep(0.2)
+
+    LOGGER.info("websocket server shutdown requested")
+    server.close()
+    await server.wait_closed()
+    loop.stop()
+
+
+def run(listen_addr, listen_port, cmds_queue, get_relay_states_snapshot, startup_event=None, startup_error=None, stop_event=None):
     """Spustí WebSocket server v aktuálním vlákně."""
     async def handler(websocket, path):
         await websocket_handler(websocket, path, cmds_queue, get_relay_states_snapshot)
@@ -122,11 +133,14 @@ def run(listen_addr, listen_port, cmds_queue, get_relay_states_snapshot, startup
 
     try:
         start_server = websockets.serve(handler, listen_addr, listen_port, ping_interval=30, ping_timeout=5)
-        loop.run_until_complete(start_server)
+        server = loop.run_until_complete(start_server)
         LOGGER.info("websocket server listening on %s:%d", listen_addr, listen_port)
 
         if startup_event:
             startup_event.set()
+
+        if stop_event:
+            loop.create_task(shutdown_watcher(server, stop_event, loop))
 
         loop.run_forever()
     except Exception as err:

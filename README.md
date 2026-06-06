@@ -140,6 +140,8 @@ Show version:
 
 The daemon writes detailed logs to `LOG_FILE` and stores its process lock in `PID_FILE`.
 
+On `SIGINT` or `SIGTERM`, the daemon requests a graceful shutdown, stops the WebSocket server, closes the serial/Modbus connection, and removes its PID file.
+
 # 🧩 systemd Service
 
 An example systemd unit is available in `docs/systemd/rcpd.service.example`.
@@ -316,6 +318,7 @@ For this reason, multi-relay write commands are intentionally implemented as a s
 - This project is intentionally focused on the backend daemon.
 - The current implementation assumes R421B16-style relay numbering `1..16` in the public WebSocket protocol.
 - Modbus board addresses are validated in the range `0..63`, matching the 6 DIP switch address range used by the R421B16 board.
+- Console output, logs, and WebSocket messages are in English; code comments are currently mostly Czech.
 
 # 🙏 Special Thanks
 

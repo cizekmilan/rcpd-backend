@@ -95,7 +95,7 @@ class R421B16(object):
         """
         self._verbose = verbose
 
-        assert type(modbus_obj) == Modbus
+        assert isinstance(modbus_obj, Modbus)
         self._modbus = modbus_obj
 
         # Store required board address (Configurable with DIP 6 switches)
