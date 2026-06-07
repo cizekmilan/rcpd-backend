@@ -35,7 +35,7 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 │   ├── modbus.py                            # Low-level Modbus RTU helper
 │   └── serial_ports.py                      # Serial port discovery helper
 ├── examples/
-│   ├── hardware_smoke_test.py
+│   ├── hardware_smoke_test.py              # Hardware smoke test sequence
 │   └── websocket_manual_toggle_demo.py     # Simple guarded manual toggle demo
 ├── docs/
 │   ├── database/
@@ -265,7 +265,7 @@ python3 examples/hardware_smoke_test.py
 
 The smoke test connects to the WebSocket API, asks the daemon to reload configuration, clears the command queue, and sends a fixed sequence of relay commands to verify that the daemon, Modbus communication, and relay board responses work together.
 
-The current test sequence targets board addresses `0x1` and `0x2`; some command types are tested only on `0x1`. After the switching sequence, it keeps polling relay states until interrupted.
+The tested board addresses are configured near the top of the script in `BOARD_ADDRESSES` (`0x1` and `0x2` by default). Use one address, for example `["0x1"]`, when only one board should be tested. The full relay command sequence is executed for one configured board address, then for the next one. After the switching sequence, it keeps polling relay states until interrupted.
 
 The smoke test sends real relay commands. Use it only when the connected hardware and powered devices can be safely switched.
 
