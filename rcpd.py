@@ -40,12 +40,33 @@ def get_env_int(name, default):
         return default
 
 
+def get_env_log_level(name, default):
+    """Načte úroveň logování z .env a při chybě vrátí výchozí hodnotu."""
+    levels = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARN": logging.WARNING,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+    default = default.upper()
+    value = (os.getenv(name, default) or default).upper()
+
+    if value not in levels:
+        print(f"Invalid value for {name} in .env, using default: {default}", file=sys.stderr)
+        value = default
+
+    return value, levels[value]
+
+
 DEVICE = os.getenv("DEVICE", "/dev/ttyAMA0") or "/dev/ttyAMA0"
 BAUD_RATE = get_env_int("BAUD_RATE", 9600)
 WS_SERVER_LISTENING_ADDR = os.getenv("WS_SERVER_LISTENING_ADDR") or None
 WS_SERVER_LISTENING_PORT = get_env_int("WS_SERVER_LISTENING_PORT", 8001)
 COMMAND_QUEUE_MAX_SIZE = get_env_int("COMMAND_QUEUE_MAX_SIZE", 100)
 LOG_FILE = os.getenv("LOG_FILE", "/var/log/rcpd.log") or "/var/log/rcpd.log"
+LOG_LEVEL_NAME, LOG_LEVEL = get_env_log_level("LOG_LEVEL", "INFO")
 PID_FILE = os.getenv("PID_FILE", "/var/run/rcpd.pid") or "/var/run/rcpd.pid"
 
 DB_HOST = os.getenv("DB_HOST", "localhost") or "localhost"
@@ -64,7 +85,7 @@ if COMMAND_QUEUE_MAX_SIZE < 1:
 
 LOG_FORMAT = logging.Formatter('%(asctime)-25s %(name)-40s %(threadName)-15s %(levelname)-8s %(module)-30s %(funcName)-30s :%(lineno)-8s %(message)s')
 LOGGER = logging.getLogger()
-# globální výchozí úroveň logování pro všechny připojené handlery
+# globální logger nechává projít vše, úroveň výpisu řídí jednotlivé handlery
 LOGGER.setLevel(logging.DEBUG)  # logging.NOTSET/DEBUG/INFO/WARN/ERROR/CRITICAL
 
 
@@ -72,6 +93,7 @@ def configure_file_logging():
     """Nastaví souborové logování démona; konzolový handler se přidává volitelně přes -d."""
     logger_fh = RotatingFileHandler(LOG_FILE, maxBytes=(1024*1024*1), backupCount=5)
     logger_fh.setFormatter(LOG_FORMAT)
+    logger_fh.setLevel(LOG_LEVEL)
     LOGGER.addHandler(logger_fh)
 
 
@@ -81,6 +103,7 @@ def log_runtime_config():
     LOGGER.info("websocket: listen_addr=%s listen_port=%d", WS_SERVER_LISTENING_ADDR, WS_SERVER_LISTENING_PORT)
     LOGGER.info("command queue: max_size=%d", COMMAND_QUEUE_MAX_SIZE)
     LOGGER.info("database: host=%s name=%s", DB_HOST, DB_NAME)
+    LOGGER.info("logging: level=%s file=%s", LOG_LEVEL_NAME, LOG_FILE)
 
 
 # Poznámky:
@@ -101,6 +124,8 @@ boards = []
 cmds_queue = queue.Queue(maxsize=COMMAND_QUEUE_MAX_SIZE)
 # poslední úspěšně vyčtený stav všech relé
 relay_states = {}
+# příznak prvního úspěšného vyčtení stavů relé
+relay_states_initialized = False
 # zámek kritické sekce bránící souběhu při Modbus komunikaci
 lock = Lock()
 # zámek pro konzistentní čtení a zápis snapshotu stavů relé mezi vlákny
@@ -179,7 +204,7 @@ def is_already_running():
 def print_usage():
     """Vypíše dostupné argumenty démona."""
     print(f"Usage: {os.path.basename(__file__)} [-d] [-h] [-v]")
-    print("  -d|--debug        enable debug mode with verbose output")
+    print("  -d|--debug        mirror logs to console using LOG_LEVEL")
     print("  -h|--help         display this help and exit")
     print("  -v|--version      print version of this script")
 
@@ -197,7 +222,7 @@ def parse_arguments():
             # přidáme logování do konzole
             logger_ch = logging.StreamHandler(sys.stdout)
             logger_ch.setFormatter(LOG_FORMAT)
-            logger_ch.setLevel(logging.DEBUG)  # logging.NOTSET/DEBUG/INFO/WARN/ERROR/CRITICAL
+            logger_ch.setLevel(LOG_LEVEL)  # logging.NOTSET/DEBUG/INFO/WARN/ERROR/CRITICAL
             LOGGER.addHandler(logger_ch)
         elif opt in ("-h", "--help"):
             print_usage()
@@ -224,13 +249,28 @@ def get_boards_from_db():
     return len(boards)
 
 
+def format_relay_states(states):
+    """Zformátuje stavy relé do krátkého jednořádkového zápisu pro log."""
+    formatted_boards = []
+
+    for board_address in sorted(states):
+        board_states = states[board_address]
+        relay_states_text = "".join(str(board_states[relay]) for relay in sorted(board_states))
+        formatted_boards.append(f"0x{board_address:02X}={relay_states_text}")
+
+    return " ".join(formatted_boards)
+
+
 def get_relay_states():
     """Vyčte aktuální stavy všech registrovaných relé přes Modbus a vrátí, zda čtení proběhlo úspěšně."""
+    global relay_states_initialized
+
     time.sleep(0.02)
 
     if not boards:
         with state_lock:
             relay_states.clear()
+            relay_states_initialized = False
         LOGGER.warning("relay states could not be read because no relay boards are registered")
         return False
 
@@ -246,11 +286,24 @@ def get_relay_states():
             return False
 
     with state_lock:
+        previous_states = {
+            board_address: dict(states)
+            for board_address, states in relay_states.items()
+        }
+        first_successful_read = not relay_states_initialized
+        states_changed = previous_states != current_states
         relay_states.clear()
         relay_states.update(current_states)
+        relay_states_initialized = True
 
     time.sleep(0.02)
-    LOGGER.info("relay states: %s", current_states)
+
+    if first_successful_read:
+        LOGGER.info("relay states initial: %s", format_relay_states(current_states))
+    elif states_changed:
+        LOGGER.info("relay states changed: %s", format_relay_states(current_states))
+    else:
+        LOGGER.debug("relay states unchanged: %s", format_relay_states(current_states))
 
     return True
 

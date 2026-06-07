@@ -103,6 +103,8 @@ COMMAND_QUEUE_MAX_SIZE=100
 
 LOG_FILE=/var/log/rcpd.log
 PID_FILE=/var/run/rcpd.pid
+
+LOG_LEVEL=INFO
 ```
 
 Common serial devices:
@@ -120,6 +122,8 @@ The WebSocket server listens on `127.0.0.1` by default. Use `0.0.0.0` only when 
 
 `COMMAND_QUEUE_MAX_SIZE` limits how many relay control commands may wait for Modbus processing. When the queue is full, new relay commands are rejected with an `ERROR` WebSocket response instead of being accepted indefinitely.
 
+`LOG_LEVEL` controls file logging and optional console logging. Use `INFO` for normal operation and `DEBUG` for detailed troubleshooting.
+
 # 🚀 Running
 
 Start the daemon:
@@ -128,7 +132,7 @@ Start the daemon:
 ./rcpd.py
 ```
 
-Enable debug output to the console:
+Mirror logs to the console:
 
 ```bash
 ./rcpd.py --debug
@@ -141,6 +145,8 @@ Show version:
 ```
 
 The daemon writes detailed logs to `LOG_FILE` and stores its process lock in `PID_FILE`.
+
+Relay states are logged on the first successful read and then only when a state changes at `INFO` level. Repeated unchanged state reads are logged only at `DEBUG` level.
 
 On `SIGINT` or `SIGTERM`, the daemon requests a graceful shutdown, stops the WebSocket server, closes the serial/Modbus connection, and removes its PID file.
 
@@ -306,7 +312,7 @@ Run a syntax/bytecode check:
 python3 -m compileall .
 ```
 
-# ⚡ R421B16 Modbus Notes
+# 🔌 R421B16 Modbus Notes
 
 Relay state refresh is optimized for the R421B16 board.
 
