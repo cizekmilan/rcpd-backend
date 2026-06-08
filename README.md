@@ -244,9 +244,15 @@ Relay command meaning:
 * `CMD_ON` / `CMD_OFF` - switch selected relay numbers on or off.
 * `CMD_TOGGLE` - toggle selected relay numbers.
 * `CMD_ON_ALL` / `CMD_OFF_ALL` - switch all relays on the selected board.
-* `CMD_LATCH` - board-level latch command for selected relays.
+* `CMD_LATCH` - board-level latch/interlock command for selected relays.
 * `CMD_MOMENTARY` - board-level momentary pulse command for selected relays.
-* `CMD_DELAY` - board-level delayed command using the `delay` value.
+* `CMD_DELAY` - board-level delayed off command using the `delay` value.
+
+Observed R421B16 behavior from the hardware smoke test:
+
+* `CMD_LATCH` switches the selected relay on and switches other relays on the same board off. When multiple relays are sent through the current API, commands are executed sequentially, so the last relay in the list remains on.
+* `CMD_MOMENTARY` switches the selected relay on briefly and then the board switches it off again automatically. The observed pulse length was about one second.
+* `CMD_DELAY` switches the selected relay on immediately and the board switches it off after the requested `delay` value. When multiple relays are sent, they are commanded sequentially, so their delayed switch-off times may be staggered.
 
 Relay numbers are `1..16`.
 
@@ -271,7 +277,7 @@ python3 examples/hardware_smoke_test.py
 
 The smoke test connects to the WebSocket API, asks the daemon to reload configuration, clears the command queue, and sends a fixed sequence of relay commands to verify that the daemon, Modbus communication, and relay board responses work together.
 
-The tested board addresses are configured near the top of the script in `BOARD_ADDRESSES` (`0x1` and `0x2` by default). Use one address, for example `["0x1"]`, when only one board should be tested. The full relay command sequence is executed for one configured board address, then for the next one. After the switching sequence, it keeps polling relay states until interrupted.
+The tested board addresses are configured near the top of the script in `BOARD_ADDRESSES` (`0x1` and `0x2` by default). Use one address, for example `["0x1"]`, when only one board should be tested. The full relay command sequence is executed for one configured board address, then for the next one. After the switching sequence, it keeps polling relay states every `STATE_POLL_INTERVAL` seconds until interrupted.
 
 The smoke test sends real relay commands. Use it only when the connected hardware and powered devices can be safely switched.
 

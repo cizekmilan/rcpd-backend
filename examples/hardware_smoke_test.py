@@ -25,6 +25,9 @@ WS_SERVER_PORT = 8001
 # Relay boards used by this smoke test. Keep one address if only one board is connected.
 BOARD_ADDRESSES = ["0x1", "0x2"]
 
+# Delay between repeated state polling requests at the end of the smoke test.
+STATE_POLL_INTERVAL = 5
+
 
 def websocket_uri():
     """Sestaví WebSocket URL pro smoke test klienta."""
@@ -95,6 +98,7 @@ async def hardware_smoke_test():
 
         while True:
             await send_and_print(websocket, {"CMD_GETSTATES": None})
+            await asyncio.sleep(STATE_POLL_INTERVAL)
 
 
 def main():
