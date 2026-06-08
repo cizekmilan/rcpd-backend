@@ -126,6 +126,7 @@ def normalize_config(raw_config):
             relays[relay_num] = {
                 "id": relay.get("id"),
                 "description": relay.get("description") or "",
+                "contact_type": relay.get("contact_type") or "NO",
             }
 
         boards[address] = {
@@ -137,6 +138,14 @@ def normalize_config(raw_config):
         }
 
     return boards
+
+
+def format_contact_type(contact_type):
+    """Vrátí kontaktní typ relé ve formátu vhodném pro konzolový výpis."""
+    if contact_type not in ("NO", "NC"):
+        contact_type = "NO"
+
+    return f"[{contact_type}]"
 
 
 async def load_config():
@@ -167,7 +176,8 @@ def print_config(boards):
 
         for relay_num in sorted(board["relays"]):
             description = board["relays"][relay_num]["description"] or "-"
-            print(f"    {address}/{relay_num:02d}  {description}")
+            contact_type = board["relays"][relay_num]["contact_type"]
+            print(f"    {address}/{relay_num:02d}  {format_contact_type(contact_type)}  {description}")
 
 
 def print_prompt_help():

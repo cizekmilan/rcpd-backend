@@ -219,7 +219,7 @@ Helper commands:
 Helper command meaning:
 
 * `CMD_HELLO` - simple daemon availability check.
-* `CMD_GETCONFIG` - returns relay board and relay label configuration from the database.
+* `CMD_GETCONFIG` - returns relay board, relay label, and relay contact type configuration from the database.
 * `CMD_GETSTATES` - returns the latest known relay state snapshot.
 * `CMD_RSTQUEUE` - clears queued control commands that have not been processed yet.
 * `CFG_CHANGED` - tells the daemon to reload relay board configuration from the database.
@@ -258,6 +258,8 @@ Relay numbers are `1..16`.
 
 Board addresses can be decimal or hexadecimal strings, for example `1`, `24`, `0x01`, or `0x18`.
 
+Relay `contact_type` values are `NO` or `NC`. This is configuration metadata for clients; `CMD_ON` and `CMD_OFF` still mean physical relay coil on/off and are not inverted by `contact_type`.
+
 Each WebSocket response includes:
 
 * `result` - `OK` or `ERROR`
@@ -287,13 +289,13 @@ There is also a simple guarded manual toggle demo:
 python3 examples/websocket_manual_toggle_demo.py
 ```
 
-It loads relay configuration from the daemon through `CMD_GETCONFIG`, validates `board/relay` input against that configuration, toggles one relay at a time, and can reset the command queue with `rq`. It is intentionally small and is not the primary TUI client.
+It loads relay configuration from the daemon through `CMD_GETCONFIG`, prints relay contact types as `[NO]` or `[NC]`, validates `board/relay` input against that configuration, toggles one relay at a time, and can reset the command queue with `rq`. It is intentionally small and is not the primary TUI client.
 
 # 📚 Documentation
 
 Additional project documentation is stored in `docs/`:
 
-* `docs/database/` - demo database schema and demo data.
+* `docs/database/` - demo database schema and demo data, including relay `contact_type` metadata.
 * `docs/hardware/R421B16/` - relay board reference files and wiring diagram.
 * `docs/hardware/Waveshare-RS485-CAN-HAT/` - Raspberry Pi HAT reference material. See also the [Waveshare RS485 CAN HAT wiki](https://www.waveshare.com/wiki/RS485_CAN_HAT).
 * `docs/systemd/` - example systemd service unit.

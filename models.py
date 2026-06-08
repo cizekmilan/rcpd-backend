@@ -30,6 +30,7 @@ class Relay(BaseModel):
     board = ForeignKeyField(Board, backref='relays', on_delete='CASCADE')  # cizí klíč na Board
     description = CharField(null=True)
     relay_num = IntegerField()
+    contact_type = CharField(default='NO')
 
     class Meta:
         table_name = 'relays'

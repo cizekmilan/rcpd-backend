@@ -7,6 +7,8 @@ import json
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 
 
 EXAMPLES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "examples")
@@ -35,7 +37,7 @@ class TestWebsocketManualToggleDemo(unittest.TestCase):
                 "enabled": "Y",
                 "total_relays": 16,
                 "relays": [
-                    {"id": 101, "description": "server XY", "relay_num": 3},
+                    {"id": 101, "description": "server XY", "relay_num": 3, "contact_type": "NC"},
                     {"id": 102, "description": None, "relay_num": 4},
                 ],
             }
@@ -44,7 +46,31 @@ class TestWebsocketManualToggleDemo(unittest.TestCase):
         self.assertEqual(config[1]["board_type"], "R421B16")
         self.assertEqual(config[1]["total_relays"], 16)
         self.assertEqual(config[1]["relays"][3]["description"], "server XY")
+        self.assertEqual(config[1]["relays"][3]["contact_type"], "NC")
         self.assertEqual(config[1]["relays"][4]["description"], "")
+        self.assertEqual(config[1]["relays"][4]["contact_type"], "NO")
+
+    def test_print_config_shows_contact_type_in_brackets(self):
+        """Ověří, že výpis konfigurace zobrazuje typ kontaktu relé."""
+        boards = {
+            1: {
+                "board_type": "R421B16",
+                "enabled": "Y",
+                "total_relays": 16,
+                "relays": {
+                    1: {"description": "server XY", "contact_type": "NO"},
+                    2: {"description": "router", "contact_type": "NC"},
+                },
+            }
+        }
+        stdout = StringIO()
+
+        with redirect_stdout(stdout):
+            demo.print_config(boards)
+
+        output = stdout.getvalue()
+        self.assertIn("1/01  [NO]  server XY", output)
+        self.assertIn("1/02  [NC]  router", output)
 
     def test_validate_board_relay_accepts_known_enabled_relay(self):
         """Ověří validní kombinaci desky a relé."""

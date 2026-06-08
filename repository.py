@@ -62,7 +62,8 @@ def get_relays_config():
             json_config[modbus_address]['relays'].append({
                 'id': relay.id,
                 'description': relay.description,
-                'relay_num': relay.relay_num
+                'relay_num': relay.relay_num,
+                'contact_type': relay.contact_type,
             })
 
         LOGGER.info("relays config: %s", json_config)
