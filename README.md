@@ -289,7 +289,7 @@ There is also a simple guarded manual toggle demo:
 python3 examples/websocket_manual_toggle_demo.py
 ```
 
-It loads relay configuration from the daemon through `CMD_GETCONFIG`, prints relay contact types as `[NO]` or `[NC]`, validates `board/relay` input against that configuration, toggles one relay at a time, and can reset the command queue with `rq`. It is intentionally small and is not the primary TUI client.
+It loads relay configuration from the daemon through `CMD_GETCONFIG`, prints relay contact types as `[NO]` or `[NC]`, shows a simple colored relay state overview for enabled boards, validates `board/relay` input against that configuration, toggles one relay at a time, and can reset the command queue with `rq`. It is intentionally small and is not the primary TUI client.
 
 # 📚 Documentation
 

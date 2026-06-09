@@ -72,6 +72,55 @@ class TestWebsocketManualToggleDemo(unittest.TestCase):
         self.assertIn("1/01  [NO]  server XY", output)
         self.assertIn("1/02  [NC]  router", output)
 
+    def test_normalize_relay_states_indexes_boards_and_relays_by_int(self):
+        """Ověří normalizaci stavů relé vrácených démonem."""
+        relay_states = demo.normalize_relay_states({
+            "1": {"1": 1, "2": 0},
+            "2": {"1": 0, "2": 1},
+        })
+
+        self.assertEqual(relay_states[1][1], 1)
+        self.assertEqual(relay_states[1][2], 0)
+        self.assertEqual(relay_states[2][1], 0)
+        self.assertEqual(relay_states[2][2], 1)
+
+    def test_print_relay_states_shows_enabled_boards_only(self):
+        """Ověří barevný výpis stavů relé pro aktivní desky."""
+        boards = {
+            1: {
+                "enabled": "Y",
+                "relays": {
+                    1: {},
+                    2: {},
+                },
+            },
+            2: {
+                "enabled": "N",
+                "relays": {
+                    1: {},
+                },
+            },
+        }
+        relay_states = {
+            1: {
+                1: 1,
+                2: 0,
+            },
+            2: {
+                1: 1,
+            },
+        }
+        stdout = StringIO()
+
+        with redirect_stdout(stdout):
+            demo.print_relay_states(boards, relay_states)
+
+        output = stdout.getvalue()
+        self.assertIn("board 1 / 0x01", output)
+        self.assertIn("On", output)
+        self.assertIn("Off", output)
+        self.assertNotIn("board 2 / 0x02", output)
+
     def test_validate_board_relay_accepts_known_enabled_relay(self):
         """Ověří validní kombinaci desky a relé."""
         boards = {

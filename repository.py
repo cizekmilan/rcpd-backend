@@ -66,7 +66,9 @@ def get_relays_config():
                 'contact_type': relay.contact_type,
             })
 
-        LOGGER.info("relays config: %s", json_config)
+        relays_count = sum(len(board['relays']) for board in json_config.values())
+        LOGGER.info("relays config loaded: boards=%d relays=%d", len(json_config), relays_count)
+        LOGGER.debug("relays config detail: %s", json_config)
 
     except Exception as err:
         LOGGER.exception("DB error while loading relay configuration: %s", err)

@@ -18,13 +18,14 @@ import os
 import re
 import signal
 import sys
-
+from termcolor import colored
 import websockets
 
 VERSION = "0.08"
 
 WS_SERVER_ADDR = "127.0.0.1"
 WS_SERVER_PORT = 8001
+POST_TOGGLE_STATE_DELAY = 1
 
 
 def signal_handler(sig, frame):
@@ -148,6 +149,53 @@ def format_contact_type(contact_type):
     return f"[{contact_type}]"
 
 
+def normalize_relay_states(raw_states):
+    """Převede stav relé z JSON odpovědi na slovník indexovaný int adresou desky a relé."""
+    relay_states = {}
+
+    for board_address, states in raw_states.items():
+        address = int(board_address)
+        relay_states[address] = {
+            int(relay_num): int(state)
+            for relay_num, state in states.items()
+        }
+
+    return relay_states
+
+
+def format_relay_state(state):
+    """Vrátí barevný blok pro jeden stav relé."""
+    if state == 1:
+        return colored("  On  ", "white", "on_green")
+    elif state == 0:
+        return colored("  Off ", "white", "on_red")
+
+    return colored("  ?   ", "white", "on_yellow")
+
+
+def print_relay_states(boards, relay_states):
+    """Vypíše barevnou vizualizaci stavů relé pro všechny aktivní desky."""
+    print("\nRelay states:")
+    enabled_boards = 0
+
+    for address in sorted(boards):
+        board = boards[address]
+        if board["enabled"] != "Y":
+            continue
+
+        enabled_boards += 1
+        states = relay_states.get(address, {})
+        output = f"  board {address} / 0x{address:02X}: "
+
+        for relay_num in sorted(board["relays"]):
+            output += format_relay_state(states.get(relay_num))
+
+        print(output)
+
+    if enabled_boards == 0:
+        print("  no enabled boards")
+
+
 async def load_config():
     """Načte konfiguraci desek a relé z démona přes CMD_GETCONFIG."""
     response = await send_to_websocket(make_command("CMD_GETCONFIG"))
@@ -159,6 +207,20 @@ async def load_config():
         return normalize_config(response.get("config", {}))
     except (KeyError, TypeError, ValueError) as err:
         print(f"Invalid daemon configuration response: {err}", file=sys.stderr)
+        return None
+
+
+async def load_relay_states():
+    """Načte poslední známé stavy relé z démona přes CMD_GETSTATES."""
+    response = await send_to_websocket(make_command("CMD_GETSTATES"))
+    if not is_ok_response(response):
+        print(f"Unable to load relay states: {response}", file=sys.stderr)
+        return None
+
+    try:
+        return normalize_relay_states(response.get("relay_states", {}))
+    except (TypeError, ValueError) as err:
+        print(f"Invalid relay states response: {err}", file=sys.stderr)
         return None
 
 
@@ -234,8 +296,10 @@ async def toggle_relay(board_address, relay_num):
 
     if is_ok_response(response):
         print(f"Toggle command accepted for {board_address}/{relay_num}. Queue: {response.get('in_queue')}")
+        return True
     else:
         print(f"Toggle command failed for {board_address}/{relay_num}: {response}")
+        return False
 
 
 async def interactive_loop(boards):
@@ -273,7 +337,11 @@ async def interactive_loop(boards):
             print(error)
             continue
 
-        await toggle_relay(board_address, relay_num)
+        if await toggle_relay(board_address, relay_num):
+            await asyncio.sleep(POST_TOGGLE_STATE_DELAY)
+            relay_states = await load_relay_states()
+            if relay_states is not None:
+                print_relay_states(boards, relay_states)
 
 
 async def main():
@@ -288,6 +356,10 @@ async def main():
         sys.exit(1)
 
     print_config(boards)
+    relay_states = await load_relay_states()
+    if relay_states is not None:
+        print_relay_states(boards, relay_states)
+
     await interactive_loop(boards)
 
 
