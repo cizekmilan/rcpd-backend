@@ -14,25 +14,32 @@ LOGGER = logging.getLogger(__name__)
 def get_enabled_board_addresses():
     """Načte Modbus adresy povolených relay boardů z databáze."""
     addresses = []
+    total_count = 0
+    disabled_count = 0
 
     try:
         db.connect(reuse_if_open=True)
 
         query = (Board
-                 .select(Board.modbus_address)
-                 .where(Board.enabled == 'Y'))
+                 .select(Board.modbus_address, Board.enabled)
+                 .order_by(Board.modbus_address.asc()))
 
         for board in query:
-            addresses.append(board.modbus_address)
+            total_count += 1
+
+            if board.enabled == 'Y':
+                addresses.append(board.modbus_address)
+            else:
+                disabled_count += 1
 
     except Exception as err:
         LOGGER.exception("DB error while loading relay boards: %s", err)
-        return False, addresses
+        return False, addresses, total_count, disabled_count
     finally:
         if not db.is_closed():
             db.close()
 
-    return True, addresses
+    return True, addresses, total_count, disabled_count
 
 
 def get_relays_config():
@@ -41,6 +48,19 @@ def get_relays_config():
 
     try:
         db.connect(reuse_if_open=True)
+
+        boards = (Board
+                  .select()
+                  .order_by(Board.modbus_address.asc()))
+
+        for board in boards:
+            json_config[board.modbus_address] = {
+                'id': board.id,
+                'board_type': board.board_type,
+                'total_relays': board.total_relays,
+                'enabled': board.enabled,
+                'relays': []
+            }
 
         relays = (Relay
                   .select(Relay, Board)

@@ -36,6 +36,7 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 │   └── serial_ports.py                      # Serial port discovery helper
 ├── examples/
 │   ├── hardware_smoke_test.py              # Hardware smoke test sequence
+│   ├── rcpd_tui.py                         # SSH-friendly terminal UI prototype
 │   └── websocket_manual_toggle_demo.py     # Simple guarded manual toggle demo
 ├── docs/
 │   ├── database/
@@ -290,6 +291,14 @@ python3 examples/websocket_manual_toggle_demo.py
 ```
 
 It loads relay configuration from the daemon through `CMD_GETCONFIG`, prints relay contact types as `[NO]` or `[NC]`, shows a simple colored relay state overview for enabled boards, validates `board/relay` input against that configuration, toggles one relay at a time, and can reset the command queue with `rq`. It is intentionally small and is not the primary TUI client.
+
+The terminal UI prototype can be started with:
+
+```bash
+python3 examples/rcpd_tui.py
+```
+
+It loads relay rows from `CMD_GETCONFIG`, refreshes relay states and queue depth through `CMD_GETSTATES`, and provides SSH-friendly navigation, scrolling, action focus, and Enter-driven row actions. Disabled boards are shown as non-interactive `DISABLED` board headers without relay rows.
 
 # 📚 Documentation
 

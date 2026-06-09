@@ -236,10 +236,11 @@ def print_config(boards):
         enabled = "enabled" if board["enabled"] == "Y" else "disabled"
         print(f"  board {address} / 0x{address:02X}: {board['board_type']}, {board['total_relays']} relays, {enabled}")
 
-        for relay_num in sorted(board["relays"]):
-            description = board["relays"][relay_num]["description"] or "-"
-            contact_type = board["relays"][relay_num]["contact_type"]
-            print(f"    {address}/{relay_num:02d}  {format_contact_type(contact_type)}  {description}")
+        if board["enabled"] == "Y":
+            for relay_num in sorted(board["relays"]):
+                description = board["relays"][relay_num]["description"] or "-"
+                contact_type = board["relays"][relay_num]["contact_type"]
+                print(f"    {address}/{relay_num:02d}  {format_contact_type(contact_type)}  {description}")
 
 
 def print_prompt_help():

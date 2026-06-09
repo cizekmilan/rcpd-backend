@@ -234,7 +234,7 @@ def parse_arguments():
 
 def get_boards_from_db():
     """Načte povolené relay boardy z databáze, vytvoří runtime objekty a vrátí jejich počet."""
-    retval, board_addresses = repository.get_enabled_board_addresses()
+    retval, board_addresses, total_boards, disabled_boards = repository.get_enabled_board_addresses()
     if not retval:
         return len(boards)
 
@@ -245,7 +245,7 @@ def get_boards_from_db():
 
     boards.clear()
     boards.extend(loaded_boards)
-    LOGGER.info("loaded relay boards: %d", len(boards))
+    LOGGER.info("loaded relay boards: %d (%d disabled)", total_boards, disabled_boards)
     return len(boards)
 
 

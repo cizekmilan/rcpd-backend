@@ -50,6 +50,34 @@ class TestWebsocketManualToggleDemo(unittest.TestCase):
         self.assertEqual(config[1]["relays"][4]["description"], "")
         self.assertEqual(config[1]["relays"][4]["contact_type"], "NO")
 
+    def test_normalize_config_keeps_disabled_boards(self):
+        """Overi, ze manual toggle demo zna i disabled desky."""
+        config = demo.normalize_config({
+            "1": {
+                "id": 10,
+                "board_type": "R421B16",
+                "enabled": "Y",
+                "total_relays": 16,
+                "relays": [
+                    {"id": 101, "description": "server XY", "relay_num": 3},
+                ],
+            },
+            "2": {
+                "id": 11,
+                "board_type": "R421B16",
+                "enabled": "N",
+                "total_relays": 16,
+                "relays": [
+                    {"id": 201, "description": "disabled", "relay_num": 1},
+                ],
+            },
+        })
+
+        self.assertIn(1, config)
+        self.assertIn(2, config)
+        self.assertEqual(config[2]["enabled"], "N")
+        self.assertEqual(config[2]["relays"][1]["description"], "disabled")
+
     def test_print_config_shows_contact_type_in_brackets(self):
         """Ověří, že výpis konfigurace zobrazuje typ kontaktu relé."""
         boards = {
@@ -71,6 +99,27 @@ class TestWebsocketManualToggleDemo(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("1/01  [NO]  server XY", output)
         self.assertIn("1/02  [NC]  router", output)
+
+    def test_print_config_hides_disabled_board_relays(self):
+        """Overi, ze disabled deska se vypise bez jednotlivych rele."""
+        boards = {
+            1: {
+                "board_type": "R421B16",
+                "enabled": "N",
+                "total_relays": 16,
+                "relays": {
+                    1: {"description": "server XY", "contact_type": "NO"},
+                },
+            }
+        }
+        stdout = StringIO()
+
+        with redirect_stdout(stdout):
+            demo.print_config(boards)
+
+        output = stdout.getvalue()
+        self.assertIn("board 1 / 0x01: R421B16, 16 relays, disabled", output)
+        self.assertNotIn("1/01", output)
 
     def test_normalize_relay_states_indexes_boards_and_relays_by_int(self):
         """Ověří normalizaci stavů relé vrácených démonem."""
