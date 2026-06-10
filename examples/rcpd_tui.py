@@ -20,10 +20,8 @@ Keys:
     PgUp/PgDn     move one page
     Home/End      jump to first/last relay
     Tab           move through action buttons on selected row
-    Enter/Space   toggle selected relay or run focused action
-    o             set selected relay ON
-    f             set selected relay OFF
-    r             reset selected relay pulse marker
+    Left/Right    move through row action buttons
+    Enter         run focused action button
     q             quit
 """
 
@@ -44,10 +42,11 @@ import websockets
 STATE_ON = "ON"
 STATE_OFF = "OFF"
 STATE_DISABLED = "DIS"
-ACTION_COUNT = 6
+ACTION_COUNT = 2
 WS_SERVER_ADDR = "127.0.0.1"
 WS_SERVER_PORT = 8001
 DAEMON_STATUS_POLL_INTERVAL = 1.0
+RESET_DELAY_SECONDS = 5.0
 
 
 @dataclass
@@ -120,6 +119,22 @@ def state_text(relay_state: Optional[int]) -> str:
     if relay_state == 0:
         return STATE_OFF
     return "?"
+
+
+def opposite_power_command(relay: RelayRow) -> str:
+    """Vrati prikaz pro prepnuti do opacneho napajeciho stavu rele."""
+    if relay.state == STATE_ON:
+        return "CMD_OFF"
+
+    return "CMD_ON"
+
+
+def opposite_power_action_label(relay: RelayRow) -> str:
+    """Vrati popisek akcniho tlacitka podle aktualniho stavu rele."""
+    if opposite_power_command(relay) == "CMD_OFF":
+        return "[OFF]"
+
+    return "[ON ]"
 
 
 def build_relays_from_config(config: dict, relay_states: Optional[dict[int, dict[int, int]]] = None) -> list[RelayRow]:
@@ -202,6 +217,14 @@ def format_command_target(command: PendingRelayCommand) -> str:
     return f"0x{command.board_addr:02X}/{command.relay_num:02d}"
 
 
+def send_pending_relay_command(command: PendingRelayCommand, ws_command: str) -> Optional[dict]:
+    """Odesle jeden rele prikaz z background workeru."""
+    return asyncio.run(send_ws_command(
+        ws_command,
+        {str(command.board_addr): {"relays": [command.relay_num]}},
+    ))
+
+
 def command_worker(
     commands: queue.Queue,
     state: RuntimeState,
@@ -216,17 +239,34 @@ def command_worker(
             continue
 
         target = format_command_target(pending_command)
-        response = asyncio.run(send_ws_command(
-            pending_command.command,
-            {str(pending_command.board_addr): {"relays": [pending_command.relay_num]}},
-        ))
+        if pending_command.command == "RST":
+            with state_lock:
+                state.status = f"RST started for {target}. Waiting {RESET_DELAY_SECONDS:.0f}s between toggles."
 
-        if not response:
-            message = f"{pending_command.command} failed for {target}: daemon offline."
-        elif response.get("result") != "OK":
-            message = f"{pending_command.command} failed for {target}: {response.get('message')}"
+            first_response = send_pending_relay_command(pending_command, "CMD_TOGGLE")
+            if not first_response:
+                message = f"RST failed for {target}: daemon offline."
+            elif first_response.get("result") != "OK":
+                message = f"RST failed for {target}: {first_response.get('message')}"
+            elif stop_event.wait(RESET_DELAY_SECONDS):
+                message = f"RST interrupted for {target}."
+            else:
+                second_response = send_pending_relay_command(pending_command, "CMD_TOGGLE")
+                if not second_response:
+                    message = f"RST second toggle failed for {target}: daemon offline."
+                elif second_response.get("result") != "OK":
+                    message = f"RST second toggle failed for {target}: {second_response.get('message')}"
+                else:
+                    message = f"RST finished for {target}."
         else:
-            message = f"{pending_command.command} accepted for {target}."
+            response = send_pending_relay_command(pending_command, pending_command.command)
+
+            if not response:
+                message = f"{pending_command.command} failed for {target}: daemon offline."
+            elif response.get("result") != "OK":
+                message = f"{pending_command.command} failed for {target}: {response.get('message')}"
+            else:
+                message = f"{pending_command.command} accepted for {target}."
 
         with state_lock:
             state.status = message
@@ -392,11 +432,9 @@ def render(
         state = f"{relay.state:<3}"
         contact_type = f"[{relay.contact_type}]"
         actions = (
-            "[TGL]",
-            "[ON ]",
-            "[OFF]",
+            opposite_power_action_label(relay),
             "[RST]",
-            "[PING]",
+            "[MON]",
             "[SCHED]",
         )
 
@@ -414,8 +452,12 @@ def render(
 
         x = 21 + desc_width
         for action_index, item in enumerate(actions):
-            if is_selected and focused_action == action_index:
+            is_control = action_index < ACTION_COUNT
+
+            if is_control and is_selected and focused_action == action_index:
                 action_style = attr(pairs, "action_focus", curses.A_BOLD)
+            elif not is_control:
+                action_style = attr(pairs, "dim")
             elif is_selected:
                 action_style = row_style
             else:
@@ -431,7 +473,7 @@ def render(
     if next_index < len(relays):
         add_clipped(stdscr, body_bottom - 1, width - 10, "v more", 10, attr(pairs, "dim"))
 
-    footer_right = "Up/Down select | Tab actions | Enter run | PgUp/PgDn page | q quit"
+    footer_right = "Up/Down select | Left/Right action | Enter run | PgUp/PgDn page | q quit"
     add_split_bar(stdscr, height - 1, runtime_status or status, footer_right, width, attr(pairs, "header"))
     stdscr.refresh()
 
@@ -510,14 +552,14 @@ def selectable_index_from_target(relays: list[RelayRow], target: int, direction:
     return first_selectable_index(relays)
 
 
-def command_for_action(focused_action: Optional[int]) -> Optional[str]:
+def command_for_action(relay: RelayRow, focused_action: Optional[int]) -> Optional[str]:
     """Vrátí WebSocket příkaz pro vybranou řádkovou akci."""
-    if focused_action is None or focused_action == 0:
-        return "CMD_TOGGLE"
+    if focused_action is None:
+        return None
+    if focused_action == 0:
+        return opposite_power_command(relay)
     if focused_action == 1:
-        return "CMD_ON"
-    if focused_action == 2:
-        return "CMD_OFF"
+        return "RST"
     return None
 
 
@@ -541,20 +583,11 @@ def enqueue_relay_command(commands: queue.Queue, relay: RelayRow, command: str) 
 
 def run_focused_action(relay: RelayRow, focused_action: Optional[int], commands: queue.Queue) -> str:
     """Spustí akci vybranou v aktuálním řádku a vrátí stavovou hlášku."""
-    command = command_for_action(focused_action)
+    command = command_for_action(relay, focused_action)
     if command:
         return enqueue_relay_command(commands, relay, command)
 
-    if focused_action == 3:
-        relay.last_action = "rst"
-        return f"RST action placeholder for 0x{relay.board_addr:02X}/{relay.relay_num:02d} ({relay.description})."
-    if focused_action == 4:
-        relay.last_action = "ping"
-        return f"PING watch placeholder for 0x{relay.board_addr:02X}/{relay.relay_num:02d} ({relay.description})."
-    if focused_action == 5:
-        relay.last_action = "sched"
-        return f"SCHED placeholder for 0x{relay.board_addr:02X}/{relay.relay_num:02d} ({relay.description})."
-    return "Unknown action."
+    return "Select an action with Tab/Left/Right first."
 
 
 def read_key(stdscr: curses.window) -> int:
@@ -574,6 +607,10 @@ def read_key(stdscr: curses.window) -> int:
     stdscr.timeout(old_timeout)
 
     text = "".join(sequence)
+    if text in ("[D", "OD"):
+        return curses.KEY_LEFT
+    if text in ("[C", "OC"):
+        return curses.KEY_RIGHT
     if text in ("[H", "OH", "[1~", "[7~"):
         return curses.KEY_HOME
     if text in ("[F", "OF", "[4~", "[8~"):
@@ -674,23 +711,13 @@ def main(stdscr: curses.window) -> None:
             elif key == curses.KEY_END:
                 selected = last_selectable_index(relays)
                 focused_action = None
-            elif key == 9:
+            elif key in (9, curses.KEY_RIGHT):
                 focused_action = 0 if focused_action is None else (focused_action + 1) % ACTION_COUNT
-            elif key == curses.KEY_BTAB:
+            elif key in (curses.KEY_BTAB, curses.KEY_LEFT):
                 focused_action = ACTION_COUNT - 1 if focused_action is None else (focused_action - 1) % ACTION_COUNT
-            elif key in (curses.KEY_ENTER, 10, 13, ord(" ")):
+            elif key in (curses.KEY_ENTER, 10, 13):
                 relay = relays[selected]
                 set_status(runtime_state, state_lock, run_focused_action(relay, focused_action, command_queue))
-            elif key in (ord("o"), ord("O")):
-                relay = relays[selected]
-                set_status(runtime_state, state_lock, enqueue_relay_command(command_queue, relay, "CMD_ON"))
-            elif key in (ord("f"), ord("F")):
-                relay = relays[selected]
-                set_status(runtime_state, state_lock, enqueue_relay_command(command_queue, relay, "CMD_OFF"))
-            elif key in (ord("r"), ord("R")):
-                relay = relays[selected]
-                relay.last_action = "rst"
-                set_status(runtime_state, state_lock, f"RST action placeholder for 0x{relay.board_addr:02X}/{relay.relay_num:02d} ({relay.description}).")
     finally:
         stop_event.set()
         status_worker.join(timeout=1.5)
