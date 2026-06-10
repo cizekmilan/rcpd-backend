@@ -32,6 +32,7 @@ from __future__ import annotations
 import curses
 import asyncio
 import json
+import queue
 import threading
 import time
 from dataclasses import dataclass
@@ -67,6 +68,15 @@ class RuntimeState:
     queue_depth: Optional[int] = None
     daemon_online: bool = False
     relay_states: Optional[dict[int, dict[int, int]]] = None
+    status: str = ""
+
+
+@dataclass
+class PendingRelayCommand:
+    command: str
+    board_addr: int
+    relay_num: int
+    description: str
 
 
 def websocket_uri() -> str:
@@ -187,6 +197,49 @@ def background_status_worker(state: RuntimeState, state_lock: threading.Lock, st
         stop_event.wait(DAEMON_STATUS_POLL_INTERVAL)
 
 
+def format_command_target(command: PendingRelayCommand) -> str:
+    """Vrati kratky text cile rele prikazu pro stavovou listu."""
+    return f"0x{command.board_addr:02X}/{command.relay_num:02d}"
+
+
+def command_worker(
+    commands: queue.Queue,
+    state: RuntimeState,
+    state_lock: threading.Lock,
+    stop_event: threading.Event,
+) -> None:
+    """Na pozadi odesila rele prikazy, aby UI smycka necekala na WebSocket."""
+    while not stop_event.is_set():
+        try:
+            pending_command = commands.get(timeout=0.2)
+        except queue.Empty:
+            continue
+
+        target = format_command_target(pending_command)
+        response = asyncio.run(send_ws_command(
+            pending_command.command,
+            {str(pending_command.board_addr): {"relays": [pending_command.relay_num]}},
+        ))
+
+        if not response:
+            message = f"{pending_command.command} failed for {target}: daemon offline."
+        elif response.get("result") != "OK":
+            message = f"{pending_command.command} failed for {target}: {response.get('message')}"
+        else:
+            message = f"{pending_command.command} accepted for {target}."
+
+        with state_lock:
+            state.status = message
+
+        commands.task_done()
+
+
+def set_status(state: RuntimeState, state_lock: threading.Lock, message: str) -> None:
+    """Ulozi text pro spodni stavovou listu."""
+    with state_lock:
+        state.status = message
+
+
 def init_colors() -> dict[str, int]:
     """Inicializuje curses barevné páry používané v TUI."""
     curses.start_color()
@@ -207,7 +260,7 @@ def init_colors() -> dict[str, int]:
 
     curses.init_pair(pairs["normal"], curses.COLOR_WHITE, -1)
     curses.init_pair(pairs["dim"], curses.COLOR_CYAN, -1)
-    curses.init_pair(pairs["header"], curses.COLOR_BLACK, curses.COLOR_CYAN)
+    curses.init_pair(pairs["header"], curses.COLOR_BLACK, curses.COLOR_WHITE)
     curses.init_pair(pairs["board"], curses.COLOR_YELLOW, -1)
     curses.init_pair(pairs["selected"], curses.COLOR_BLACK, curses.COLOR_WHITE)
     curses.init_pair(pairs["on"], curses.COLOR_GREEN, -1)
@@ -245,6 +298,18 @@ def ellipsize(text: str, width: int) -> str:
     return text[: width - 3] + "..."
 
 
+def add_split_bar(stdscr: curses.window, y: int, left_text: str, right_text: str, width: int, style: int) -> None:
+    """VykreslĂ­ jednĂ©Ĺ™Ăˇdkovou stavovou liĹˇtu s levou a pravou ÄŤĂˇstĂ­."""
+    add_clipped(stdscr, y, 0, " " * width, width, style)
+
+    left = f" {left_text} "
+    right = ellipsize(f" {right_text} ", width)
+    left_width = max(0, width - len(right))
+
+    add_clipped(stdscr, y, 0, ellipsize(left, left_width), left_width, style)
+    add_clipped(stdscr, y, max(0, width - len(right)), right, len(right), style)
+
+
 def render(
     stdscr: curses.window,
     pairs: dict[str, int],
@@ -275,20 +340,17 @@ def render(
     with state_lock:
         clock = runtime_state.clock
         queue_depth = runtime_state.queue_depth
-        daemon_online = runtime_state.daemon_online
+        runtime_status = runtime_state.status
 
     boards_count = len({relay.board_addr for relay in relays})
     relays_count = sum(1 for relay in relays if relay.relay_num > 0)
     queue_text = str(queue_depth) if queue_depth is not None else "?"
-    daemon_text = "online" if daemon_online else "offline"
-    title = f" RCPD TUI  boards: {boards_count}  relays: {relays_count}  queue: {queue_text}  daemon: {daemon_text}  {clock} "
-    add_clipped(stdscr, 0, 0, title, width, attr(pairs, "header", curses.A_BOLD))
+    header_left = "RCPD TUI - states and configuration"
+    header_right = f"boards: {boards_count}  relays: {relays_count}  queue: {queue_text}  {clock}"
+    add_split_bar(stdscr, 0, header_left, header_right, width, attr(pairs, "header", curses.A_BOLD))
 
-    subtitle = " SSH/PuTTY friendly terminal UI prototype - configuration and states from rcpd "
-    add_clipped(stdscr, 1, 0, subtitle, width, attr(pairs, "dim"))
-
-    body_top = 3
-    body_bottom = height - 3
+    body_top = 2
+    body_bottom = height - 1
     last = len(relays)
     next_index = scroll
 
@@ -367,20 +429,17 @@ def render(
     if scroll > 0:
         add_clipped(stdscr, body_top - 1, width - 10, "^ more", 10, attr(pairs, "dim"))
     if next_index < len(relays):
-        add_clipped(stdscr, body_bottom, width - 10, "v more", 10, attr(pairs, "dim"))
+        add_clipped(stdscr, body_bottom - 1, width - 10, "v more", 10, attr(pairs, "dim"))
 
-    add_clipped(stdscr, height - 2, 0, " " * width, width, attr(pairs, "header"))
-    add_clipped(stdscr, height - 2, 1, status, width - 2, attr(pairs, "header"))
-
-    help_text = " Up/Down move | Tab actions | Enter run | PgUp/PgDn page | o on | f off | r rst | q quit "
-    add_clipped(stdscr, height - 1, 0, help_text, width, attr(pairs, "normal"))
+    footer_right = "Up/Down select | Tab actions | Enter run | PgUp/PgDn page | q quit"
+    add_split_bar(stdscr, height - 1, runtime_status or status, footer_right, width, attr(pairs, "header"))
     stdscr.refresh()
 
 
 def page_size(stdscr: curses.window) -> int:
     """Spočítá přibližný počet řádků pro stránkový posun v aktuálním terminálu."""
     height, _ = stdscr.getmaxyx()
-    return max(1, height - 8)
+    return max(1, height - 4)
 
 
 def clamp_scroll(selected: int, scroll: int, relays_count: int, stdscr: curses.window) -> int:
@@ -462,26 +521,29 @@ def command_for_action(focused_action: Optional[int]) -> Optional[str]:
     return None
 
 
-def run_relay_command(relay: RelayRow, command: str) -> str:
+def enqueue_relay_command(commands: queue.Queue, relay: RelayRow, command: str) -> str:
     """Pošle relé příkaz démonu a vrátí stavovou hlášku pro spodní lištu."""
-    payload = {str(relay.board_addr): {"relays": [relay.relay_num]}}
-    response = asyncio.run(send_ws_command(command, payload))
+    pending_command = PendingRelayCommand(
+        command=command,
+        board_addr=relay.board_addr,
+        relay_num=relay.relay_num,
+        description=relay.description,
+    )
 
-    if not response:
-        return f"{command} failed for 0x{relay.board_addr:02X}/{relay.relay_num:02d}: daemon offline."
-
-    if response.get("result") != "OK":
-        return f"{command} failed for 0x{relay.board_addr:02X}/{relay.relay_num:02d}: {response.get('message')}"
+    try:
+        commands.put_nowait(pending_command)
+    except queue.Full:
+        return f"Local command queue is full. {command} for 0x{relay.board_addr:02X}/{relay.relay_num:02d} was not queued."
 
     relay.last_action = command
-    return f"{command} accepted for 0x{relay.board_addr:02X}/{relay.relay_num:02d}. Queue: {response.get('in_queue')}"
+    return f"{command} queued for 0x{relay.board_addr:02X}/{relay.relay_num:02d}."
 
 
-def run_focused_action(relay: RelayRow, focused_action: Optional[int]) -> str:
+def run_focused_action(relay: RelayRow, focused_action: Optional[int], commands: queue.Queue) -> str:
     """Spustí akci vybranou v aktuálním řádku a vrátí stavovou hlášku."""
     command = command_for_action(focused_action)
     if command:
-        return run_relay_command(relay, command)
+        return enqueue_relay_command(commands, relay, command)
 
     if focused_action == 3:
         relay.last_action = "rst"
@@ -545,20 +607,29 @@ def main(stdscr: curses.window) -> None:
         clock=time.strftime("%H:%M:%S"),
         queue_depth=queue_depth,
         daemon_online=daemon_online,
+        status=status,
     )
     state_lock = threading.Lock()
     stop_event = threading.Event()
-    worker = threading.Thread(
+    command_queue = queue.Queue(maxsize=32)
+    status_worker = threading.Thread(
         target=background_status_worker,
         args=(runtime_state, state_lock, stop_event),
         daemon=True,
     )
-    worker.start()
+    relay_command_worker = threading.Thread(
+        target=command_worker,
+        args=(command_queue, runtime_state, state_lock, stop_event),
+        daemon=True,
+    )
+    status_worker.start()
+    relay_command_worker.start()
 
     try:
         while True:
             with state_lock:
                 latest_relay_states = runtime_state.relay_states
+                status = runtime_state.status
 
             apply_relay_states(relays, latest_relay_states)
 
@@ -577,13 +648,13 @@ def main(stdscr: curses.window) -> None:
             if key in (ord("q"), ord("Q")):
                 break
             if key == curses.KEY_RESIZE:
-                status = "Terminal resized."
+                set_status(runtime_state, state_lock, "Terminal resized.")
                 continue
             if selected < 0:
                 if relays:
-                    status = "All configured boards are disabled. No relay can be controlled."
+                    set_status(runtime_state, state_lock, "All configured boards are disabled. No relay can be controlled.")
                 else:
-                    status = "No relay configuration loaded. Start rcpd daemon and restart TUI."
+                    set_status(runtime_state, state_lock, "No relay configuration loaded. Start rcpd daemon and restart TUI.")
                 continue
             if key == curses.KEY_UP:
                 selected = previous_selectable_index(relays, selected)
@@ -609,20 +680,21 @@ def main(stdscr: curses.window) -> None:
                 focused_action = ACTION_COUNT - 1 if focused_action is None else (focused_action - 1) % ACTION_COUNT
             elif key in (curses.KEY_ENTER, 10, 13, ord(" ")):
                 relay = relays[selected]
-                status = run_focused_action(relay, focused_action)
+                set_status(runtime_state, state_lock, run_focused_action(relay, focused_action, command_queue))
             elif key in (ord("o"), ord("O")):
                 relay = relays[selected]
-                status = run_relay_command(relay, "CMD_ON")
+                set_status(runtime_state, state_lock, enqueue_relay_command(command_queue, relay, "CMD_ON"))
             elif key in (ord("f"), ord("F")):
                 relay = relays[selected]
-                status = run_relay_command(relay, "CMD_OFF")
+                set_status(runtime_state, state_lock, enqueue_relay_command(command_queue, relay, "CMD_OFF"))
             elif key in (ord("r"), ord("R")):
                 relay = relays[selected]
                 relay.last_action = "rst"
-                status = f"RST action placeholder for 0x{relay.board_addr:02X}/{relay.relay_num:02d} ({relay.description})."
+                set_status(runtime_state, state_lock, f"RST action placeholder for 0x{relay.board_addr:02X}/{relay.relay_num:02d} ({relay.description}).")
     finally:
         stop_event.set()
-        worker.join(timeout=1.5)
+        status_worker.join(timeout=1.5)
+        relay_command_worker.join(timeout=1.5)
 
 
 if __name__ == "__main__":
