@@ -46,7 +46,7 @@ ACTION_COUNT = 2
 WS_SERVER_ADDR = "127.0.0.1"
 WS_SERVER_PORT = 8001
 DAEMON_STATUS_POLL_INTERVAL = 1.0
-RESET_DELAY_SECONDS = 5.0
+RESET_DELAY_SECONDS = 10.0
 
 
 @dataclass
@@ -296,6 +296,8 @@ def init_colors() -> dict[str, int]:
         "action": 8,
         "warn": 9,
         "action_focus": 10,
+        "indicator": 11,
+        "selected_indicator": 12,
     }
 
     curses.init_pair(pairs["normal"], curses.COLOR_WHITE, -1)
@@ -308,6 +310,8 @@ def init_colors() -> dict[str, int]:
     curses.init_pair(pairs["action"], curses.COLOR_CYAN, -1)
     curses.init_pair(pairs["warn"], curses.COLOR_YELLOW, -1)
     curses.init_pair(pairs["action_focus"], curses.COLOR_WHITE, curses.COLOR_BLUE)
+    curses.init_pair(pairs["indicator"], curses.COLOR_MAGENTA, -1)
+    curses.init_pair(pairs["selected_indicator"], curses.COLOR_BLUE, curses.COLOR_WHITE)
 
     return pairs
 
@@ -456,8 +460,10 @@ def render(
 
             if is_control and is_selected and focused_action == action_index:
                 action_style = attr(pairs, "action_focus", curses.A_BOLD)
+            elif not is_control and is_selected:
+                action_style = attr(pairs, "selected_indicator", curses.A_BOLD)
             elif not is_control:
-                action_style = attr(pairs, "dim")
+                action_style = attr(pairs, "indicator", curses.A_BOLD)
             elif is_selected:
                 action_style = row_style
             else:
@@ -695,22 +701,16 @@ def main(stdscr: curses.window) -> None:
                 continue
             if key == curses.KEY_UP:
                 selected = previous_selectable_index(relays, selected)
-                focused_action = None
             elif key == curses.KEY_DOWN:
                 selected = next_selectable_index(relays, selected)
-                focused_action = None
             elif key == curses.KEY_PPAGE:
                 selected = selectable_index_from_target(relays, selected - page_size(stdscr), -1)
-                focused_action = None
             elif key == curses.KEY_NPAGE:
                 selected = selectable_index_from_target(relays, selected + page_size(stdscr), 1)
-                focused_action = None
             elif key == curses.KEY_HOME:
                 selected = first_selectable_index(relays)
-                focused_action = None
             elif key == curses.KEY_END:
                 selected = last_selectable_index(relays)
-                focused_action = None
             elif key in (9, curses.KEY_RIGHT):
                 focused_action = 0 if focused_action is None else (focused_action + 1) % ACTION_COUNT
             elif key in (curses.KEY_BTAB, curses.KEY_LEFT):

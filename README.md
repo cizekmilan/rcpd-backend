@@ -35,9 +35,9 @@ The daemon keeps Modbus access serialized, periodically reads relay states, and 
 │   ├── modbus.py                            # Low-level Modbus RTU helper
 │   └── serial_ports.py                      # Serial port discovery helper
 ├── examples/
-│   ├── hardware_smoke_test.py              # Hardware smoke test sequence
-│   ├── rcpd_tui.py                         # SSH-friendly terminal UI prototype
-│   └── websocket_manual_toggle_demo.py     # Simple guarded manual toggle demo
+│   ├── hardware_smoke_test.py               # Hardware smoke test sequence
+│   ├── rcpd_tui.py                          # SSH-friendly terminal UI prototype
+│   └── websocket_manual_toggle_demo.py      # Simple guarded manual toggle demo
 ├── docs/
 │   ├── database/
 │   │   └── rcpd_schema_with_demo_data.sql   # Demo database schema and data
